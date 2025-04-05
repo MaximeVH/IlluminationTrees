@@ -171,6 +171,67 @@ function crossover_height_matched(t1::AbstractNode{S,T}, t2::AbstractNode{S,T}) 
     return t1_copy, t2_copy
 end
 
+## As for mutation, we consider three types of mutations (similar to Boisvert et al. 2021):
+# 1. Change the feature used for splitting (random sample of available features)
+# 2. Change the threshold value for splitting (By adding a normally distributed random number)
+# 3. Sample a new threshold value from the data (randomly select a value from the training data)
+
+# before we can implement them, we need a prerequisite function to sample tree nodes.
+function collect_internal_nodes(tree::AbstractNode)
+    nodes = MutableNode[]  # empty vector to collect nodes
+    _collect_internal_nodes!(tree, nodes)
+    return nodes
+end
+function _collect_internal_nodes!(node::AbstractNode, nodes::Vector{MutableNode})
+    if node isa MutableNode
+        push!(nodes, node)
+        _collect_internal_nodes!(node.left, nodes)
+        _collect_internal_nodes!(node.right, nodes)
+    end
+    # do nothing for leaves
+end
+
+# The three mutation functions 
+function mutate_feature!(tree::AbstractNode, all_features::Vector{Int})
+    nodes = collect_internal_nodes(tree)
+    if isempty(nodes)
+        return
+    end
+    node = rand(nodes)
+    node.featid = rand(all_features)
+end
+
+function mutate_threshold_noise!(tree::AbstractNode, sigma::Float64 = 0.1)
+    nodes = collect_internal_nodes(tree)
+    if isempty(nodes)
+        return
+    end
+    node = rand(nodes)
+    node.featval += randn() * sigma
+end
+
+function mutate_threshold_resample!(tree::AbstractNode, features::Matrix{Float64})
+    nodes = collect_internal_nodes(tree)
+    if isempty(nodes)
+        return
+    end
+    node = rand(nodes)
+    values = features[:,node.featid]
+    node.featval = rand(values)
+end
+
+# now we collect them together into a single function, including mutation rate (probability).
+function mutate!(tree,featureIDs,features, mutation_rate=0.1)
+    if rand() < mutation_rate
+        mutate_feature!(tree, featureIDs)
+    end
+    if rand() < mutation_rate
+        mutate_threshold_resample!(tree, features)
+    else mutation_rate
+        mutate_threshold_noise!(tree)
+    end
+end
+
 
 ## Tree visualization (mutable tree version)
 
