@@ -74,3 +74,81 @@ function deepcopy_tree(tree::AbstractNode{S,T}) where {S, T}
     end
 end
 
+# Now that we have mutable trees, we can implement the crossover and mutation functions.
+# Prerequisite utility functions for node replacement and tree height computation are necessary.
+
+function replace_node!(tree::AbstractNode{S,T}, target::AbstractNode{S,T}, new_subtree::AbstractNode{S,T}) where {S, T}
+    if tree === target
+        tree = new_subtree
+        return new_subtree
+    elseif tree isa MutableNode
+        if tree.left === target
+            tree.left = new_subtree
+        else
+            replace_node!(tree.left, target, new_subtree)
+        end
+
+        if tree.right === target
+            tree.right = new_subtree
+        else
+            replace_node!(tree.right, target, new_subtree)
+        end
+    end
+    return tree
+end
+
+function compute_heights(tree::AbstractNode{S,T}) where {S, T}
+    heights = Dict{AbstractNode{S,T}, Int}()
+    _compute_heights!(tree, heights)
+    return heights
+end
+function _compute_heights!(tree::AbstractNode{S,T}, heights::Dict{AbstractNode{S,T}, Int}) where {S, T}
+    if tree isa MutableLeaf
+        heights[tree] = 0
+        return 0
+    else
+        left_h = _compute_heights!(tree.left, heights)
+        right_h = _compute_heights!(tree.right, heights)
+        h = 1 + max(left_h, right_h)
+        heights[tree] = h
+        return h
+    end
+end
+
+# We want to implement a crossover function that respects the height of the trees. This way,
+# subtrees are swapped while maintaining the maximum depth of the trees.
+
+function crossover_height_matched(t1::AbstractNode{S,T}, t2::AbstractNode{S,T}) where {S, T}
+    t1_copy = deepcopy_tree(t1)
+    t2_copy = deepcopy_tree(t2)
+
+    # Get node heights
+    h1 = compute_heights(t1_copy)
+    h2 = compute_heights(t2_copy)
+
+    # Find common heights
+    heights1 = Set(values(h1))
+    heights2 = Set(values(h2))
+    common_heights = intersect(heights1, heights2)
+
+    if isempty(common_heights)
+        println("No common height levels found — skipping crossover.")
+        return t1_copy, t2_copy
+    end
+
+    # Choose a common height
+    selected_height = rand(collect(common_heights))
+
+    # Get nodes at that height
+    nodes1 = [node for (node, h) in h1 if h == selected_height]
+    nodes2 = [node for (node, h) in h2 if h == selected_height]
+
+    subtree1 = rand(nodes1)
+    subtree2 = rand(nodes2)
+
+    # Replace subtrees
+    replace_node!(t1_copy, subtree1, deepcopy_tree(subtree2))
+    replace_node!(t2_copy, subtree2, deepcopy_tree(subtree1))
+
+    return t1_copy, t2_copy
+end
