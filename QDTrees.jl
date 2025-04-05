@@ -1,4 +1,5 @@
 using DataFrames, CSV, DecisionTree 
+using LinearAlgebra
 
 #function to display DataFrames in VSCode
 display_df(df) = VSCodeServer.vscodedisplay(df)
@@ -254,4 +255,77 @@ function PrintTree(tree::AbstractNode{S, T}, prefix::String = "", is_left::Bool 
     else
         error("Unknown node type: $(typeof(tree))")
     end
+end
+
+## Before proceeding to the genetic programming part, we need to implement our Quality-Diversity metrics and archive.
+
+## prediction output dissimilarity measure for a single sample (1 if different, 0 if same)
+function δ_raw(tree1,tree2,features)
+    if apply_tree(tree1, features) == apply_tree(tree2, features)
+        return 0
+    else
+        return 1
+    end
+end
+
+## prediction output diversity measure (output dissimilarity over all samples)
+function Δ_raw(tree1,tree2,features)
+    sum([δ_raw(tree1,tree2,features[i,:]) for i in 1:size(features,1)])
+end
+
+## Diversity measure for the whole ensemble (average pairwise Δ_raw)
+function Δ_raw_bar(trees::Vector{Union{Leaf{String1}, Node{Float64, String1}}}, features::Matrix{Float64})
+    n = length(trees)
+    Δ = zeros(Int, n, n)
+    for i in 1:n
+        for j in 1:n
+            if i != j
+                Δ[i,j] = Δ_raw(trees[i], trees[j], features)
+            end
+        end
+    end
+    return sum(triu(Δ,1))/(n*(n-1))
+end
+
+#The fitness of a tree is defined here as the accuracy of the predictions it makes on the training data.
+function fitness(tree::Union{Leaf{String1}, Node{Float64, String1}}, features::Matrix{Float64}, labels)
+    predictions = apply_tree(tree, features)
+    accuracy = sum(predictions .== labels) / length(labels)
+    return accuracy
+end
+
+# Algorithm to add a new tree to the archive, a kind of novelty search (from https://doi.org/10.1007/978-3-030-72812-0_1).
+function add_to_archive!(archive, t_new, features,labels, Δ_min,info=false)
+    t_first = archive[1]
+    t_second = archive[1]
+    for t in archive
+        if Δ_raw(t_new,t,features) < Δ_raw(t_new,t_first,features)
+            t_second = t_first
+            t_first = t
+        elseif Δ_raw(t_new,t,features) < Δ_raw(t_new,t_second,features)
+            t_second = t
+        end
+    end
+    if Δ_raw(t_new,t_first,features) > Δ_min  # was written wrongly in the original paper
+        push!(archive, t_new)
+    elseif Δ_raw(t_new,t_second,features) > Δ_min && fitness(t_new,features,labels) > fitness(t_first,features,labels)
+        # replace t_first with t_new
+        push!(archive, t_new)
+        filter!(x -> x != t_first, archive) #removes the closest tree from the archive
+        if info
+            println("Replaced tree with new tree")
+        end
+    end
+end
+
+
+## In this approach, a random forest from DecisionTree.jl is used to construct the initial population (i.e., initialize the archive).
+
+function initialize_archive(Forestmodel,features,labels, Δ_min = 30)
+    forest = Forestmodel.trees
+    archive = [forest[1],forest[2]]
+    for tree in forest[3:end]
+        add_to_archive!(archive, tree, features,labels, Δ_min)
+    end
+    return archive
 end
