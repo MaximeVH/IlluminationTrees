@@ -329,3 +329,112 @@ function initialize_archive(Forestmodel,features,labels, Δ_min = 30)
     end
     return archive
 end
+
+# Now that we've got our archive, our trees, and our genetic operations, we can implement the main loop of the algorithm.
+
+function QD_evolution(Forestmodel, features,labels, generations::Int=100, mutation_rate::Float64=0.1, Δ_min::Int=30)
+    # Initialize the archive with the random forest (from DecisionTree.jl)
+    archive = initialize_archive(Forestmodel,features,labels,Δ_min)
+    println("Initial archive size: ", length(archive))
+    for gen in 1:generations #first attempt without curiosity scores, will be added later
+        # random selection of two parents from the archive
+        parent_tree1, parent_tree2 = rand(archive, 2) 
+        # convert them to mutable trees
+        parent_tree1m = to_mutable_tree(parent_tree1)  
+        parent_tree2m = to_mutable_tree(parent_tree2)
+        # apply genetic operations
+        child_tree1, child_tree2 = crossover_height_matched(parent_tree1m, parent_tree2m)
+        mutate!(child_tree1, collect(1:size(features, 2)), features, mutation_rate)
+        mutate!(child_tree2, collect(1:size(features, 2)), features, mutation_rate)
+        # convert back to immutable trees and attempt to add them to the archive
+        add_to_archive!(archive, to_decision_tree(child_tree1), features, labels, Δ_min)
+        add_to_archive!(archive, to_decision_tree(child_tree2), features, labels, Δ_min)
+    end
+    return archive
+end
+
+
+#### Once we have evolved our diverse archive of trees, we will sample them to create new DT-based ensemble models.
+
+# We consider three selection strategies:
+# 1. Random selection of trees from the archive (diverse ensemble)
+# 2. fitness-based selection (accuracy ensemble)
+# 3. Hybrid selection (half accuracy-based, half random)
+function select_from_archive(archive,ensemble_size,features,labels,type::String="diverse")
+    diverse_ensemble = rand(archive, ensemble_size)
+    if type == "diverse"
+        return diverse_ensemble
+    else
+        fitnesses = [fitness(tree, features, labels) for tree in archive]
+        sortinds = sortperm(fitnesses, rev=true) # sort in descending order
+        accuracy_ensemble = archive[sortinds[1:ensemble_size]]
+        if type == "accuracy"
+            return accuracy_ensemble
+        else  # hybrid selection strategy
+            half_index = div(ensemble_size, 2)
+            hybrid_ensemble = archive[sortinds[1:half_index]]
+            rest = setdiff(1:length(archive), sortinds[1:half_index])
+            random_samples = rand(rest, half_index)
+            hybrid_ensemble = vcat(hybrid_ensemble, archive[random_samples])
+            return hybrid_ensemble
+        end
+    end
+end
+
+
+## Implement a general (applicable to both random and illumination forests) function that performs inference 
+## on a set of features using an ensemble of trees.
+
+# implement majority voting for the ensemble 
+
+function _hist_add!(
+    counts::Dict{T,Int}, labels::AbstractVector{T}, region::UnitRange{Int}
+) where {T}
+    for i in region
+        lbl = labels[i]
+        counts[lbl] = get(counts, lbl, 0) + 1
+    end
+    return counts
+end
+
+function _hist(
+    labels::AbstractVector{T}, region::UnitRange{Int}=1:lastindex(labels)
+) where {T}
+    _hist_add!(Dict{T,Int}(), labels, region)
+end
+
+function majority_vote(labels::AbstractVector)
+    if length(labels) == 0
+        return nothing
+    end
+    counts = _hist(labels)
+    top_vote = labels[1]
+    top_count = -1
+    for (k, v) in counts
+        if v > top_count
+            top_vote = k
+            top_count = v
+        end
+    end
+    return top_vote
+end
+
+## Apply the ensemble of trees to a set of features and return the predicted majority vote label.
+function apply_ensemble(trees, features::Vector{Float64})
+    n_trees = length(trees)
+    votes = Array{String1}(undef, n_trees)
+    for i in 1:n_trees
+        votes[i] = apply_tree(trees[i], features)
+    end
+        return majority_vote(votes)
+end
+
+### Apply the ensemble of trees to the whole training set and return the predicted majority vote labels.
+function apply_ensemble(trees, features::Matrix{Float64})
+    n_samples = size(features, 1)
+    predictions = Array{String1}(undef, n_samples)
+    for i in 1:n_samples
+        predictions[i] = apply_ensemble(trees, features[i, :])
+    end
+    return predictions
+end
