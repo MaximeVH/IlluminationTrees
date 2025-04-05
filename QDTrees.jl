@@ -74,6 +74,24 @@ function deepcopy_tree(tree::AbstractNode{S,T}) where {S, T}
     end
 end
 
+# For inference and prediction, we need to convert the mutable tree back to the immutable form.
+function to_decision_tree(tree::AbstractNode{S, T}) where {S, T}
+    if tree isa MutableLeaf
+        # Convert MutableLeaf to Leaf
+        return Leaf(tree.majority, tree.values)
+    elseif tree isa MutableNode
+        # Convert MutableNode to Node
+        return Node(
+            tree.featid,
+            tree.featval,
+            to_decision_tree(tree.left),
+            to_decision_tree(tree.right)
+        )
+    else
+        error("Unknown node type: $(typeof(tree))")
+    end
+end
+
 # Now that we have mutable trees, we can implement the crossover and mutation functions.
 # Prerequisite utility functions for node replacement and tree height computation are necessary.
 
@@ -151,4 +169,28 @@ function crossover_height_matched(t1::AbstractNode{S,T}, t2::AbstractNode{S,T}) 
     replace_node!(t2_copy, subtree2, deepcopy_tree(subtree1))
 
     return t1_copy, t2_copy
+end
+
+
+## Tree visualization (mutable tree version)
+
+function PrintTree(tree::AbstractNode{S, T}, prefix::String = "", is_left::Bool = true) where {S, T}
+    if tree isa MutableLeaf
+        # Count the number of values equal to the majority class
+        majority_count = count(x -> x == tree.majority, tree.values)
+        # Print leaf node information
+        println(prefix, (is_left ? "├─ " : "└─ "), tree.majority, " : ", majority_count, "/", length(tree.values))
+    elseif tree isa MutableNode
+        # Print internal node information
+        println(prefix, (is_left ? "├─ " : "└─ "), "Feature ", tree.featid, " < ", tree.featval, " ?")
+
+        # Prepare the prefix for child nodes
+        new_prefix = prefix * (is_left ? "│   " : "    ")
+
+        # Recursively print the left and right subtrees
+        PrintTree(tree.left, new_prefix, true)
+        PrintTree(tree.right, new_prefix, false)
+    else
+        error("Unknown node type: $(typeof(tree))")
+    end
 end
