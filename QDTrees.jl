@@ -1,6 +1,7 @@
 using DataFrames, CSV, DecisionTree 
 using LinearAlgebra
-
+using Plots
+using Random  
 #function to display DataFrames in VSCode
 display_df(df) = VSCodeServer.vscodedisplay(df)
 
@@ -57,8 +58,8 @@ function to_mutable_tree(tree::Union{Leaf, Node}, S = Nothing)
         return MutableNode{S, T}(
             tree.featid,
             tree.featval,
-            to_mutable_tree5(tree.left, S),
-            to_mutable_tree5(tree.right, S)
+            to_mutable_tree(tree.left, S),
+            to_mutable_tree(tree.right, S)
         )
     else
         error("Unknown tree type: $(typeof(tree))")
@@ -287,6 +288,19 @@ function Δ_raw_bar(trees::Vector{Union{Leaf{String1}, Node{Float64, String1}}},
     return sum(triu(Δ,1))/(n*(n-1))
 end
 
+function Δ_raw_bar(trees, features::Matrix{Float64})
+    n = length(trees)
+    Δ = zeros(Int, n, n)
+    for i in 1:n
+        for j in 1:n
+            if i != j
+                Δ[i,j] = Δ_raw(trees[i], trees[j], features)
+            end
+        end
+    end
+    return sum(triu(Δ,1))/(n*(n-1))
+end
+
 #The fitness of a tree is defined here as the accuracy of the predictions it makes on the training data.
 function fitness(tree::Union{Leaf{String1}, Node{Float64, String1}}, features::Matrix{Float64}, labels)
     predictions = apply_tree(tree, features)
@@ -361,6 +375,7 @@ end
 # 2. fitness-based selection (accuracy ensemble)
 # 3. Hybrid selection (half accuracy-based, half random)
 function select_from_archive(archive,ensemble_size,features,labels,type::String="diverse")
+    @assert type in ["diverse","accuracy","hybrid"] "Unrecognized ensemble type"
     diverse_ensemble = rand(archive, ensemble_size)
     if type == "diverse"
         return diverse_ensemble
@@ -438,3 +453,4 @@ function apply_ensemble(trees, features::Matrix{Float64})
     end
     return predictions
 end
+
