@@ -60,10 +60,8 @@ function acc_vs_diversity_plot(trainfeat,trainlabels, testfeatures, testlabels)
     return p_overall
 end
 
-
 # A heatmap of the diversity matrix of the ensembles created by the QD algorithm and the random forest.
-
-function DiversityMatrix(trees, features::Matrix{Float64})
+function DiversityMatrix(trees, features::Matrix{Float32})
     n = length(trees)
     Δ = zeros(Int, n, n)
     for i in 1:n
@@ -108,28 +106,16 @@ end
 
 # A PCA of the output predictions of the trees in the QD algorithm's ensembles and the random forest.
 
-function generate_per_tree_outputvectors(ensemble,features::Matrix{Float64})
+function generate_per_tree_outputvectors(ensemble,features::Matrix{Float32})
     n_trees = length(ensemble)
-    output_vectors = Array{String1}(undef, n_trees, size(features, 1))
+    output_vectors = Array{Bool}(undef, n_trees, size(features, 1))
     for i in 1:n_trees
         output_vectors[i, :] = apply_tree(ensemble[i], features)
     end
     return output_vectors
 end
 
-function generate_per_tree_outputvectors(ensemble, features::Matrix{Float64})
-    n_trees = length(ensemble)
-    output_vectors = Array{Int}(undef, n_trees, size(features, 1))  # Use Int for binary values (1s and 0s)
-    
-    for i in 1:n_trees
-        # Apply the tree and map "M" to 1 and "B" to 0
-        output_vectors[i, :] = [label == "M" ? 1 : 0 for label in apply_tree(ensemble[i], features)]
-    end
-    
-    return output_vectors
-end
-
-function PCA_on_output_vectors(output_vectors_ensemble::Matrix{Int},output_vectors_rf::Matrix{Int})
+function PCA_on_output_vectors(output_vectors_ensemble::Matrix{Bool},output_vectors_rf::Matrix{Bool})
     output_vectors_ensemble = output_vectors_ensemble'  # Transpose the matrix to have samples as rows and features as columns
     output_vectors_rf = output_vectors_rf'  # Transpose the matrix to have samples as rows and features as columns
     pca_model = MultivariateStats.fit(PCA, output_vectors_ensemble; maxoutdim=2)
