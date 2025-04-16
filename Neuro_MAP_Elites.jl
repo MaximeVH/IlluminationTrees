@@ -97,7 +97,7 @@ function VAE_archive(X;β=4.0, epochs=50, batchsize=16,hidden_dim = 128)
             # Update model parameters
             Flux.Optimise.update!(optimizer, ps, grads)
         end
-        println("Epoch $epoch, Loss: $(loss_fn(model, X[1,:]))")
+        # println("Epoch $epoch, Loss: $(loss_fn(model, X[1,:]))")
     end
 
     function encode_all(m,X)
@@ -233,7 +233,7 @@ function select_hybrid_ensemble(archive, n_trees, random_proportion=0.5)
     return hybrid_ensemble
 end
 
-function NeuroMapElites(features, labels; n_generations=1000, n_bins=20, n_offspring=10, mutation_rate=0.2, β=4.0, epochs=50, batchsize=16, hidden_dim = 128,num_trees=50, num_features=30, max_depth=4)
+function NeuroMapElites(features, labels; n_generations=1000, n_bins=20, n_offspring=10, mutation_rate=0.05, β=4.0, epochs=50, batchsize=16, hidden_dim = 128,num_trees=50, num_features=30, max_depth=4)
     trainfeat, trainlabels, testfeat, testlabels = train_test_split(features, labels, 0.2)
 
     forest, forestoutvect = features_to_forest_outvects(trainfeat, trainlabels,num_trees=num_trees, num_features=num_features, max_depth=max_depth)
@@ -246,7 +246,7 @@ function NeuroMapElites(features, labels; n_generations=1000, n_bins=20, n_offsp
     return archive, fitness_archive
 end
 
-function NME_exp(features, labels; n_generations=1000, n_bins=20, n_offspring=10, mutation_rate=0.2, β=4.0, epochs=50, batchsize=16, hidden_dim = 128,num_trees=50, num_features=30, max_depth=4)
+function NME_exp(features, labels; n_generations=1000, n_bins=20, n_offspring=3, mutation_rate=0.05, β=4.0, epochs=50, batchsize=16, hidden_dim = 128,num_trees=50, num_features=30, max_depth=4)
     trainfeat, trainlabels, testfeat, testlabels = train_test_split(features, labels, 0.2)
 
     forest, forestoutvect = features_to_forest_outvects(trainfeat, trainlabels,num_trees=num_trees, num_features=num_features, max_depth=max_depth)
@@ -275,8 +275,8 @@ function NME_exp(features, labels; n_generations=1000, n_bins=20, n_offspring=10
         push!(testaccs_div, Accuracy(diverse_ensemble, testfeat, testlabels))
         push!(trainaccs_div, Accuracy(diverse_ensemble, trainfeat, trainlabels))
     end
-
-    return testaccs_acc,trainaccs_acc,testaccs_div,trainaccs_div, RF_testacc, RF_trainacc
+    archHM = plot_archive(archive, fitness_archive, n_bins)
+    return archHM, testaccs_acc,trainaccs_acc,testaccs_div,trainaccs_div, RF_testacc, RF_trainacc
 end
 
 function NME_exp_val(features, labels; n_generations=50, n_bins=20, n_offspring=10, mutation_rate=0.2, β=4.0, epochs=50, batchsize=16, hidden_dim = 128,num_trees=50, num_features=30, max_depth=4)
@@ -312,6 +312,17 @@ function NME_exp_val(features, labels; n_generations=50, n_bins=20, n_offspring=
     end
 
     return testaccs_acc,trainaccs_acc,testaccs_div,trainaccs_div, RF_testacc, RF_trainacc
+end
+
+function kfolds(features, labels, k)
+    n = size(features, 1)
+    indices = collect(1:n)
+    fold_size = div(n, k)
+    shuffled_indices = shuffle(indices)
+    folds = [(shuffled_indices[1 + (i-1)*fold_size : i*fold_size],
+              vcat(shuffled_indices[1:(i-1)*fold_size], shuffled_indices[i*fold_size+1:end]))
+             for i in 1:k]
+    return folds
 end
 
 function train_test_split(features, labels, test_size::Float64=0.2)
@@ -438,4 +449,126 @@ end
 function get_ensemble_diversity(ensemble, features)
     treez = [ensemble[i].immutable_tree for i in 1:length(ensemble)]
     return Δ_raw_bar(treez,features)
+end
+
+function NME_exp_div(features, labels; n_generations=100, n_bins=20, n_offspring=3, mutation_rate=0.05, β=4.0, epochs=50, batchsize=16, hidden_dim = 128,num_trees=50, num_features=30, max_depth=4)
+    trainfeat, trainlabels, testfeat, testlabels = train_test_split(features, labels, 0.2)
+
+    forest, forestoutvect = features_to_forest_outvects(trainfeat, trainlabels,num_trees=num_trees, num_features=num_features, max_depth=max_depth)
+    latents, Encoder = VAE_archive(forestoutvect;β=β, epochs=epochs, batchsize=batchsize, hidden_dim=hidden_dim)
+    coords, scale, mins = normalize_latents(latents, n_bins)
+    archive, fitness_archive = initialize_archive(forest, coords)
+    
+
+    RF_testacc = sum(apply_ensemble(forest, testfeat) .== testlabels) / length(testlabels)
+    RF_trainacc = sum(apply_ensemble(forest, trainfeat) .== trainlabels) / length(trainlabels)
+    RF_div = get_ensemble_diversity(forest, testfeat)
+
+    trainaccs_div = []
+    testaccs_div = []
+    trainaccs_acc = []
+    testaccs_acc = []
+    divs_acc = []
+    divs_div = []
+    for i in 1:n_generations
+
+        for i in 1:100
+            generation!(archive, fitness_archive, trainfeat, trainlabels, Encoder, mins, scale, n_bins; n_offspring=n_offspring, mutation_rate=mutation_rate)
+        end
+        # Select ensembles
+        accuracy_ensemble = select_hybrid_ensemble(archive, min(50,length(archive)))
+        diverse_ensemble = select_diverse_ensemble(archive, min(50,length(archive)))
+        push!(testaccs_acc, Accuracy(accuracy_ensemble, testfeat, testlabels))
+        push!(trainaccs_acc, Accuracy(accuracy_ensemble, trainfeat, trainlabels))
+        push!(testaccs_div, Accuracy(diverse_ensemble, testfeat, testlabels))
+        push!(trainaccs_div, Accuracy(diverse_ensemble, trainfeat, trainlabels))
+        push!(divs_acc, get_ensemble_diversity(accuracy_ensemble, testfeat))
+        push!(divs_div, get_ensemble_diversity(diverse_ensemble, testfeat))
+    end
+    archHM = plot_archive(archive, fitness_archive, n_bins)
+    return archHM, testaccs_acc,trainaccs_acc,testaccs_div,trainaccs_div, RF_testacc, RF_trainacc, RF_div, divs_acc, divs_div
+end
+
+function NME_exp_div_CV(features, labels; n_generations=100, n_bins=20, n_offspring=3, mutation_rate=0.05, β=4.0, epochs=50, batchsize=16, hidden_dim=128, num_trees=50, num_features=30, max_depth=4, folds=5)
+    # Split data into k folds
+    fold_indices = kfolds(features, labels, folds)
+    
+    # Initialize arrays to store results across folds
+    all_testaccs_acc = zeros(n_generations)
+    all_trainaccs_acc = zeros(n_generations)
+    all_testaccs_div = zeros(n_generations)
+    all_trainaccs_div = zeros(n_generations)
+    all_divs_acc = zeros(n_generations)
+    all_divs_div = zeros(n_generations)
+    all_RF_testacc = 0
+    all_RF_trainacc = 0
+    all_RF_div = 0
+    archives = []
+    foldcounter = 0
+    for (test_indices, train_indices) in fold_indices
+        foldcounter += 1
+        println("Fold: $(foldcounter)")
+        # Split data into training and testing sets for the current fold
+        trainfeat, trainlabels = features[train_indices, :], labels[train_indices]
+        testfeat, testlabels = features[test_indices, :], labels[test_indices]
+
+        # Train the random forest and VAE
+        forest, forestoutvect = features_to_forest_outvects(trainfeat, trainlabels, num_trees=num_trees, num_features=num_features, max_depth=max_depth)
+        latents, Encoder = VAE_archive(forestoutvect; β=β, epochs=epochs, batchsize=batchsize, hidden_dim=hidden_dim)
+        coords, scale, mins = normalize_latents(latents, n_bins)
+        archive, fitness_archive = initialize_archive(forest, coords)
+
+        # Evaluate the random forest
+        all_RF_testacc += sum(apply_ensemble(forest, testfeat) .== testlabels) / length(testlabels)
+        all_RF_trainacc += sum(apply_ensemble(forest, trainfeat) .== trainlabels) / length(trainlabels)
+        all_RF_div += get_ensemble_diversity(forest, testfeat)
+
+
+        # Initialize arrays for this fold
+        trainaccs_div = []
+        testaccs_div = []
+        trainaccs_acc = []
+        testaccs_acc = []
+        divs_acc = []
+        divs_div = []
+
+        # Run generations
+        for i in 1:n_generations
+            for j in 1:100
+                generation!(archive, fitness_archive, trainfeat, trainlabels, Encoder, mins, scale, n_bins; n_offspring=n_offspring, mutation_rate=mutation_rate)
+            end
+
+            # Select ensembles
+            accuracy_ensemble = select_hybrid_ensemble(archive, min(50, length(archive)))
+            diverse_ensemble = select_diverse_ensemble(archive, min(50, length(archive)))
+
+            # Evaluate ensembles
+            push!(testaccs_acc, Accuracy(accuracy_ensemble, testfeat, testlabels))
+            push!(trainaccs_acc, Accuracy(accuracy_ensemble, trainfeat, trainlabels))
+            push!(testaccs_div, Accuracy(diverse_ensemble, testfeat, testlabels))
+            push!(trainaccs_div, Accuracy(diverse_ensemble, trainfeat, trainlabels))
+            push!(divs_acc, get_ensemble_diversity(accuracy_ensemble, testfeat))
+            push!(divs_div, get_ensemble_diversity(diverse_ensemble, testfeat))
+        end
+        archHM = plot_archive(archive, fitness_archive, n_bins)
+        push!(archives, archHM)
+        # Store results for this fold
+        all_testaccs_acc += testaccs_acc
+        all_trainaccs_acc += trainaccs_acc
+        all_testaccs_div += testaccs_div
+        all_trainaccs_div += trainaccs_div
+        all_divs_acc += divs_acc
+        all_divs_div += divs_div
+    end
+    all_testaccs_acc ./= folds
+    all_trainaccs_acc ./= folds
+    all_testaccs_div ./= folds
+    all_trainaccs_div ./= folds
+    all_divs_acc ./= folds
+    all_divs_div ./= folds
+    all_RF_testacc /= folds
+    all_RF_trainacc /= folds
+    all_RF_div /= folds
+
+    return archives, all_testaccs_acc, all_trainaccs_acc, all_testaccs_div, all_trainaccs_div, all_RF_testacc, all_RF_trainacc, all_RF_div, all_divs_acc, all_divs_div
 end
