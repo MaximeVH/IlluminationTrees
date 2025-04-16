@@ -183,7 +183,7 @@ function plot_archive(archive, fitness_archive, n_bins)
     return HM
 end
 
-function plot_evolution(testaccs_acc,trainaccs_acc,testaccs_div,trainaccs_div, RF_testacc, RF_trainacc)
+function PlotQuality(testaccs_acc,trainaccs_acc,testaccs_div,trainaccs_div, RF_testacc, RF_trainacc)
     generations = length(testaccs_acc)
     generations = 100 .* collect(1:generations)
     p = plot(generations, testaccs_acc, label="Test Accuracy Ensemble", xlabel="Generations", ylabel="Accuracy",legend=:outertop,title = "Acc vs Gen")
@@ -194,6 +194,24 @@ function plot_evolution(testaccs_acc,trainaccs_acc,testaccs_div,trainaccs_div, R
     hline!([RF_trainacc], label="RF_train", linestyle=:dash, color=:black)
     hline!([RF_testacc], label="RF_test", linestyle=:dash, color=:grey)
 
+    return p
+end
+
+function plotDiversity(acc_divs,div_divss, RF_div)
+    generations = length(acc_divs)
+    generations = 100 .* collect(1:generations)
+    p = plot(generations, acc_divs, label="Acc Ensemble diversity", xlabel="Generations", ylabel="Diversity",legend=:outertop) #title = "Diversity vs Gen"
+    plot!(generations, div_divss, label="Div Ensemble diversity") 
+    hline!([RF_div], label="RF diversity", linestyle=:dash, color=:black)
+
+    return p
+end
+
+
+function plotEvolution(testaccs_acc,trainaccs_acc,testaccs_div,trainaccs_div,RF_testacc, RF_trainacc, RF_div, divs_acc, divs_div)
+    p1 = PlotQuality(testaccs_acc,trainaccs_acc,testaccs_div,trainaccs_div, RF_testacc, RF_trainacc)
+    p2 = plotDiversity(divs_acc, divs_div, RF_div)
+    p = plot(p1, p2, layout=(1, 2), size=(1100, 500), title="Evolution of Quality and Diversity")
     return p
 end
 
