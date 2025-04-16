@@ -1,7 +1,22 @@
+##################################################
+#### Novelty Search visualisation functions ####
+################################################
 using Plots, MultivariateStats, Statistics
-include("QDTrees.jl")
 
-### Plotting the accuracy vs diversity of the ensembles created by the QD algorithm and the random forest for different ensemble sizes.
+function get_QD_ensembles(Forestmodel, archive,trainfeats,trainlabels, ensemble_size::Int=50)
+    @assert ensemble_size <= length(archive) "Ensemble size must be less than or equal to the archive size."
+    @assert ensemble_size <= length(Forestmodel.trees) "Not enough trees in the random forest."
+
+    acc_ensemble = select_from_archive(archive, ensemble_size, trainfeats, trainlabels, "accuracy")
+    div_ensemble = select_from_archive(archive, ensemble_size, trainfeats, trainlabels, "diverse")
+    hybrid_ensemble = select_from_archive(archive, ensemble_size, trainfeats, trainlabels, "hybrid")
+    # random_forest = Forestmodel.trees[1:ensemble_size] # selection of fittest individuals should probably be 
+    # done using the training set accs
+    random_forest = select_from_archive(Forestmodel.trees,ensemble_size,trainfeats,trainlabels,"accuracy")
+
+    return acc_ensemble, div_ensemble, hybrid_ensemble, random_forest
+end
+
 function acc_vs_diversity(trainfeat,trainlabels, testfeatures, testlabels)
     ensemble_sizes = [5,10, 20, 30, 50]
     acc_accuracies, div_accuracies, hybrid_accuracies, rf_accuracies = [], [], [], []
@@ -45,7 +60,8 @@ function acc_vs_diversity_plot(trainfeat,trainlabels, testfeatures, testlabels)
     return p_overall
 end
 
-### A heatmap of the diversity matrix of the ensembles created by the QD algorithm and the random forest.
+
+# A heatmap of the diversity matrix of the ensembles created by the QD algorithm and the random forest.
 
 function DiversityMatrix(trees, features::Matrix{Float64})
     n = length(trees)
@@ -60,7 +76,7 @@ function DiversityMatrix(trees, features::Matrix{Float64})
     return Δ
 end
 
-function ensemble_disagreement_heatmap(forestmodel,archive,testfeat)
+function ensemble_disagreement_heatmap(forestmodel,archive,testfeat,testlabels)
     ensemble_size = length(forestmodel.trees)
     acc_ensemble = select_from_archive(archive, ensemble_size, testfeat, testlabels, "accuracy")
     divmat_acc = DiversityMatrix(acc_ensemble, testfeat)
@@ -90,7 +106,7 @@ function ensemble_disagreement_heatmap(forestmodel,archive,testfeat)
     return heatmaps
 end
 
-### A PCA of the output predictions of the trees in the QD algorithm's ensembles and the random forest.
+# A PCA of the output predictions of the trees in the QD algorithm's ensembles and the random forest.
 
 function generate_per_tree_outputvectors(ensemble,features::Matrix{Float64})
     n_trees = length(ensemble)
@@ -135,14 +151,22 @@ function QD_PCA_comparison_plot(Forestmodel,archive,testfeat,testlabels)
     accs_rf = [fitness(tree, testfeat, testlabels) for tree in Forestmodel.trees]
 
     PCA_outvects,PCA_outvects_rf = PCA_on_output_vectors(aens_outvects_QDensemble,aens_outvectsrf)
-
-    fig_ = scatter(PCA_outvects_rf[1, :], PCA_outvects_rf[2, :], marker_z=accs_rf , title="PCA of Ensemble Output Vectors", xlabel="PC1", ylabel="PC2", legend=false, size=(800, 600), color=:viridis,markershape=:square)
-    scatter!(PCA_outvects[1, :], PCA_outvects[2, :], marker_z=accs, title="PCA of Ensemble Output Vectors", xlabel="PC1", ylabel="PC2", legend=false, size=(800, 600), color=:viridis,colorbar=true) #markershape=:+
+    explained_variance = get_pca_explained_variance(aens_outvects_QDensemble)	
+    fig_ = scatter(PCA_outvects_rf[1, :], PCA_outvects_rf[2, :], marker_z=accs_rf , title="PCA of Ensemble Output Vectors", xlabel="PC1 ($(explained_variance[1])%)", ylabel="PC2 ($(explained_variance[2])%)", legend=false, size=(800, 600), color=:viridis,markershape=:square)
+    scatter!(PCA_outvects[1, :], PCA_outvects[2, :], marker_z=accs, title="PCA of Ensemble Output Vectors", size=(800, 600), color=:viridis,colorbar=true) #markershape=:+
     
     return fig_
 end
 
-### Scatter plot on how the accuracy of the trees in the QD algorithm's ensembles and the random forest relate to their diversity.
+function get_pca_explained_variance(output_vects)
+    output_vects = output_vects'  # Transpose the matrix to have samples as rows and features as columns
+    pca_model = MultivariateStats.fit(PCA, output_vects; maxoutdim=size(output_vects, 1));
+    var_explained = Int.(round.(( pca_model.prinvars ./ sum(pca_model.prinvars) ) * 100))
+    return var_explained[1:2]
+end
+
+
+# Scatter plot on how the accuracy of the trees in the QD algorithm's ensembles and the random forest relate to their diversity.
 
 function accuracy_vs_uniqueness_plot(forestmodel,archive,testfeat,testlabels)
     ensemble_size = length(forestmodel.trees)
@@ -155,9 +179,62 @@ function accuracy_vs_uniqueness_plot(forestmodel,archive,testfeat,testlabels)
     rf_div_mat = DiversityMatrix(forestmodel.trees, testfeat)
 
     average_dists_per_tree_rf = [mean(rf_div_mat[i,:]) for i in eachindex(forestmodel.trees)]
-    average_dists_per_tree_ensemble = [mean(rf_div_mat[i,:]) for i in eachindex(acc_ensemble)]
+    average_dists_per_tree_ensemble = [mean(ensemble_div_mat[i,:]) for i in eachindex(acc_ensemble)]
 
     fig = scatter(average_dists_per_tree_rf, accs_rf, label="Random Forest", xlabel="Average Distance to Other Trees", ylabel="Accuracy" )
     scatter!(average_dists_per_tree_ensemble, accs, label="QD Ensemble") #markershape=:+
     return fig
 end
+
+##################################################
+#### Neuro MAP-Elites visualisation functions ####
+##################################################
+
+function plot_archive(archive, fitness_archive, n_bins)
+    filled = map(coord -> haskey(archive, coord) ? fitness_archive[coord] : NaN,
+             Iterators.product(1:n_bins, 1:n_bins))
+    HM = heatmap(reshape(collect(filled), n_bins, n_bins)', xlabel="z₁", ylabel="z₂", title="Archive")
+    return HM
+end
+
+function plot_evolution(testaccs_acc,trainaccs_acc,testaccs_div,trainaccs_div, RF_testacc, RF_trainacc)
+    generations = length(testaccs_acc)
+    generations = 100 .* collect(1:generations)
+    p = plot(generations, testaccs_acc, label="Test Accuracy Ensemble", xlabel="Generations", ylabel="Accuracy",legend=:outertop,title = "Acc vs Gen")
+    plot!(p, generations, trainaccs_acc, label="Train Accuracy Ensemble")
+    plot!(p,generations, testaccs_div, label="Test Accuracy Diverse Ensemble")   #linestyle=:dash)
+    plot!(p, generations, trainaccs_div, label="Train Accuracy Diverse Ensemble")#,linestyle=:dash
+
+    hline!([RF_trainacc], label="RF_train", linestyle=:dash, color=:black)
+    hline!([RF_testacc], label="RF_test", linestyle=:dash, color=:grey)
+
+    return p
+end
+
+function plot_evolution_quality(testaccs_acc,trainaccs_acc, RF_testacc, RF_trainacc)
+    generations = length(testaccs_acc)
+    generations = 100 .* collect(1:generations)
+    p = plot(generations, testaccs_acc, label="Test Accuracy Ensemble", xlabel="Generations", ylabel="Accuracy",legend=:outertop) #title = "Acc vs Gen"
+    plot!(p, generations, trainaccs_acc, label="Train Accuracy Ensemble")
+
+    hline!([RF_trainacc], label="RF_train", linestyle=:dash, color=:black)
+    hline!([RF_testacc], label="RF_test", linestyle=:dash, color=:grey)
+
+    return p
+end
+
+function plot_evolution_diversity(divs, RF_div)
+    generations = length(divs)
+    generations = 100 .* collect(1:generations)
+    p = plot(generations, divs, label="Ensemble diversity", xlabel="Generations", ylabel="Diversity",legend=:outertop) #title = "Diversity vs Gen"
+    hline!([RF_div], label="RF diversity", linestyle=:dash, color=:black)
+
+    return p
+end
+
+function plot_evolution(testaccs_acc,trainaccs_acc,divs, RF_testacc, RF_trainacc, RF_div)
+    quality_evolution = plot_evolution_quality(testaccs_acc,trainaccs_acc, RF_testacc, RF_trainacc)
+    diversity_evolution = plot_evolution_diversity(divs, RF_div)
+    p = plot(quality_evolution, diversity_evolution, layout=(1, 2), size=(1100, 500)) #title="Evolution of Quality and Diversity"
+    return p
+end 
