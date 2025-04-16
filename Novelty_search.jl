@@ -11,35 +11,34 @@ function δ_raw(tree1,tree2,features)
 end
 
 ## prediction output diversity measure (output dissimilarity over all samples)
-function Δ_raw(tree1,tree2,features)
-    sum([δ_raw(tree1,tree2,features[i,:]) for i in 1:size(features,1)])
+function Δ_raw(tree1, tree2, features)
+    total = 0
+    for i in axes(features,1)
+        total += δ_raw(tree1, tree2, features[i, :])
+    end
+    return total
 end
-
 ## Diversity measure for the whole ensemble (average pairwise Δ_raw)
 function Δ_raw_bar(trees::Vector{Union{Leaf{Bool}, Node{Float32, Bool}}}, features::Matrix{Float32})
     n = length(trees)
-    Δ = zeros(Int, n, n)
-    for i in 1:n
-        for j in 1:n
-            if i != j
-                Δ[i,j] = Δ_raw(trees[i], trees[j], features)
-            end
+    sum_Δ = 0
+    for i in 1:n-1
+        for j in i+1:n
+            sum_Δ += Δ_raw(trees[i], trees[j], features)
         end
     end
-    return sum(triu(Δ,1))/(n*(n-1))
+    return sum_Δ / (n * (n - 1))
 end
 
 function Δ_raw_bar(trees, features::Matrix{Float32})
     n = length(trees)
-    Δ = zeros(Int, n, n)
-    for i in 1:n
-        for j in 1:n
-            if i != j
-                Δ[i,j] = Δ_raw(trees[i], trees[j], features)
-            end
+    sum_Δ = 0
+    for i in 1:n-1
+        for j in i+1:n
+            sum_Δ += Δ_raw(trees[i], trees[j], features)
         end
     end
-    return sum(triu(Δ,1))/(n*(n-1))
+    return sum_Δ / (n * (n - 1))
 end
 
 #The fitness of a tree is defined here as the accuracy of the predictions it makes on the training data.
