@@ -224,6 +224,8 @@ end
 
 select_diverse_ensemble(archive, n_trees) = rand(collect(values(archive)), n_trees)
 
+archive_ensemble(archive) = filter(x-> !isnothing(x), collect(values(archive)))
+
 function select_hybrid_ensemble(archive, n_trees, random_proportion=0.5) 
     n_random_trees = Int(floor(n_trees * random_proportion)) 
     n_accurate_trees = n_trees - n_random_trees
