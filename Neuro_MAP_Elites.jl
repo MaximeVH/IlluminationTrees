@@ -694,3 +694,34 @@ function NME_Exp(trainfeat, trainlabels; n_generations=1000, n_bins=20, n_offspr
     return forest, archives, fitness_archives
 end
 
+function NME_Exp_CV(features, labels; n_generations=100, n_bins=30, n_offspring=3, mutation_rate=0.02, β=4, epochs=50,
+    batchsize=16, hidden_dim = 128,num_trees=50, num_features=30, max_depth=4, folds=5)
+       fold_inds = kfolds(features, labels, folds)
+   
+       fold_archs = Vector{Vector{DefaultDict}}(undef, folds)
+       fold_fitarchs = Vector{Vector{DefaultDict}}(undef, folds)
+       fold_forests = Vector{Vector{TreeWrapper}}(undef, folds)
+       fold_trainX = Vector{Matrix{Float32}}(undef, folds)
+       fold_testX = Vector{Matrix{Float32}}(undef, folds)
+       fold_trainy = Vector{Vector{Bool}}(undef, folds)
+       fold_testy = Vector{Vector{Bool}}(undef, folds)
+   
+       fold_n = 0
+       for (test_inds, train_inds) in fold_inds
+           fold_n += 1
+           trainX, trainy = features[train_inds, :], labels[train_inds]
+           testX, testy = features[test_inds, :], labels[test_inds]
+           forest, archs, fitarchs = NME_Exp(trainX, trainy; n_generations=n_generations, n_bins=n_bins,
+           n_offspring=n_offspring, mutation_rate=mutation_rate, β=β, epochs=epochs, batchsize=batchsize,
+           hidden_dim=hidden_dim, num_trees=num_trees, num_features=num_features, max_depth=max_depth)
+   
+           fold_archs[fold_n] =  archs
+           fold_fitarchs[fold_n] = fitarchs
+           fold_forests[fold_n] =  forest
+           fold_trainX[fold_n] =  trainX
+           fold_testX[fold_n] =  testX
+           fold_trainy[fold_n] =  trainy
+           fold_testy[fold_n] =  testy
+       end
+       return fold_archs, fold_fitarchs, fold_forests, fold_trainX, fold_testX, fold_trainy, fold_testy
+   end
