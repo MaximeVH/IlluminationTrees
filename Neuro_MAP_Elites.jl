@@ -675,3 +675,22 @@ function max_diversity_ensemble(archive, features::Matrix, n_trees::Int)
     selected_trees = [archive[i] for i in selected_indices]
     return selected_trees
 end
+
+function NME_Exp(trainfeat, trainlabels; n_generations=1000, n_bins=20, n_offspring=3, mutation_rate=0.05, β=4.0, epochs=50, batchsize=16, hidden_dim = 128,num_trees=50, num_features=30, max_depth=4)
+    forest, forestoutvect = features_to_forest_outvects(trainfeat, trainlabels,num_trees=num_trees, num_features=num_features, max_depth=max_depth)
+    latents, Encoder = VAE_archive(forestoutvect;β=β, epochs=epochs, batchsize=batchsize, hidden_dim=hidden_dim)
+    coords, scale, mins = normalize_latents(latents, n_bins)
+    archive, fitness_archive = initialize_archive(forest, coords)
+    
+    archives = Vector{DefaultDict}(undef, n_generations)
+    fitness_archives = Vector{DefaultDict}(undef, n_generations)
+    for i in 1:n_generations
+        for i in 1:100
+            generation!(archive, fitness_archive, trainfeat, trainlabels, Encoder, mins, scale, n_bins; n_offspring=n_offspring, mutation_rate=mutation_rate)
+        end
+        archives[i] = deepcopy(archive)
+        fitness_archives[i] = deepcopy(fitness_archive)
+    end
+    return forest, archives, fitness_archives
+end
+

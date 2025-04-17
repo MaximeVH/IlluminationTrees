@@ -182,6 +182,22 @@ function plot_archive(archive, fitness_archive, n_bins)
     HM = heatmap(reshape(collect(filled), n_bins, n_bins)', xlabel="z₁", ylabel="z₂", title="Archive")
     return HM
 end
+function plot_archive_fixed(archive, fitness_archive, n_bins, generation)
+    filled = map(coord -> haskey(archive, coord) ? fitness_archive[coord] : NaN,
+             Iterators.product(1:n_bins, 1:n_bins))
+    HM = heatmap(reshape(collect(filled), n_bins, n_bins)', xlabel="z₁", ylabel="z₂", title="Archive Gen: $(generation)",clim=(0.8, 1))
+    return HM
+end
+
+function create_archive_gif(archives,fitness_archives,n_bins)
+    @gif for i in axes(archives,1)
+        archive = archives[i]
+        fitness_arch = fitness_archives[i]
+        plot_archive_fixed(archive,fitness_arch,n_bins,i*100)  # Replace this with your actual plotting function
+    end every 1 # Adjust `every` to control frame skipping
+    # savefig(filename)  # Save the GIF to a file
+end
+
 
 function PlotQuality(testaccs_acc,trainaccs_acc,testaccs_div,trainaccs_div, RF_testacc, RF_trainacc)
     generations = length(testaccs_acc)
