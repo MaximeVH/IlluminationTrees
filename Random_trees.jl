@@ -59,3 +59,19 @@ function QD_evolution_RT(forest, features,labels; generations::Int=100, mutation
     end
     return archive
 end
+
+
+function generate_random_tree(depth::StepRange, featureIDs::Vector{Int}, features::Matrix{Float32})::AbstractNode
+    depth = rand(depth)
+    return generate_random_tree(depth, featureIDs, features)
+end
+
+function generate_random_ensemble(num_trees::Int, depth::StepRange, featureIDs::Vector{Int}, features::Matrix{Float32})
+    trees = Vector{AbstractNode}()
+    for _ in 1:num_trees
+        tree = generate_random_tree(depth, featureIDs, features)
+        push!(trees, tree)
+    end
+    ensemble = to_decision_tree.(trees)
+    return prune_tree.(ensemble,0.55) #pruning can be tuned
+end
