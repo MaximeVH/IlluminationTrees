@@ -426,6 +426,44 @@ function NeuroMapElitesRT_exp(features,labels; n_generations=100, n_bins=20, n_o
     randtrees = Treewrap_random_ensemble(randarch,trainfeatures,trainlabs)
     forestoutvect = get_forest_outvects(randtrees, trainfeatures)
     latents, Encoder = VAE_archive(forestoutvect;β=β, epochs=epochs, batchsize=batchsize, hidden_dim=hidden_dim)
+    println("$(length(latents)) latent vectors generated") 
+    coords, scale, mins = normalize_latents(latents, n_bins)
+    archive, fitness_archive = initialize_archive(randtrees, coords)
+    println("$(length(archive)) trees in initial archive")
+    trainaccs_acc = []
+    testaccs_acc = []
+    divs = []
+    for i in 1:n_generations
+        for j in 1:100
+            generation!(archive, fitness_archive, trainfeatures, trainlabs, Encoder, mins, scale, n_bins; n_offspring=n_offspring, mutation_rate=mutation_rate)
+        end
+        # Select ensembles
+        # accuracy_ensemble = select_accurate_ensemble(archive, min(50,length(archive)))
+        accuracy_ensemble = select_accurate_ensemble_random(archive,  min(50,length(archive)), trainfeatures, trainlabs)
+        push!(testaccs_acc, Accuracy(accuracy_ensemble, testfeatures, testlabs))
+        push!(trainaccs_acc, Accuracy(accuracy_ensemble, trainfeatures, trainlabs))
+        push!(divs, get_ensemble_diversity(accuracy_ensemble, testfeatures))
+    end
+    archHM = plot_archive(archive, fitness_archive, n_bins)
+    return archHM, testaccs_acc,trainaccs_acc,divs, RF_testacc, RF_trainacc, RF_div
+end
+
+
+function NeuroMapElitesRT_exp_depth(features,labels; n_generations=100, n_bins=20, n_offspring=10, mutation_rate=0.2, β=4.0, epochs=50, batchsize=16, hidden_dim = 128,num_trees=50, num_features=30, max_depth=4)
+
+    trainfeatures, trainlabs, testfeatures, testlabs = train_test_split(features, labels, 0.2)
+
+    forest, forestoutvect = features_to_forest_outvects(trainfeatures, trainlabs,num_trees=50, num_features=num_features, max_depth=max_depth)
+    RF_testacc = sum(apply_ensemble(forest, testfeatures) .== testlabs) / length(testlabs)
+    RF_trainacc = sum(apply_ensemble(forest, trainfeatures) .== trainlabs) / length(trainlabs)
+    RF_div = get_ensemble_diversity(forest, testfeatures)
+
+    randtrees = generate_random_ensemble(num_trees,range(3,max_depth,step=1),collect(1:size(trainfeatures, 2)), trainfeatures)
+    randarch = QD_evolution_RT(randtrees, trainfeatures,trainlabs,generations=300,mutation_rate=0.05, Δ_min=30)
+    println("$(length(randarch)) diverse trees generated")
+    randtrees = Treewrap_random_ensemble(randarch,trainfeatures,trainlabs)
+    forestoutvect = get_forest_outvects(randtrees, trainfeatures)
+    latents, Encoder = VAE_archive(forestoutvect;β=β, epochs=epochs, batchsize=batchsize, hidden_dim=hidden_dim)
     println("$(length(latents)) latent vectors generated")
     coords, scale, mins = normalize_latents(latents, n_bins)
     archive, fitness_archive = initialize_archive(randtrees, coords)
@@ -434,7 +472,7 @@ function NeuroMapElitesRT_exp(features,labels; n_generations=100, n_bins=20, n_o
     testaccs_acc = []
     divs = []
     for i in 1:n_generations
-        for i in 1:100
+        for j in 1:100
             generation!(archive, fitness_archive, trainfeatures, trainlabs, Encoder, mins, scale, n_bins; n_offspring=n_offspring, mutation_rate=mutation_rate)
         end
         # Select ensembles
@@ -472,9 +510,11 @@ function NME_exp_div(features, labels; n_generations=100, n_bins=20, n_offspring
     testaccs_acc = []
     divs_acc = []
     divs_div = []
+
+    archive_divs = []
     for i in 1:n_generations
 
-        for i in 1:100
+        for j in 1:100
             generation!(archive, fitness_archive, trainfeat, trainlabels, Encoder, mins, scale, n_bins; n_offspring=n_offspring, mutation_rate=mutation_rate)
         end
         # Select ensembles
@@ -486,9 +526,14 @@ function NME_exp_div(features, labels; n_generations=100, n_bins=20, n_offspring
         push!(trainaccs_div, Accuracy(diverse_ensemble, trainfeat, trainlabels))
         push!(divs_acc, get_ensemble_diversity(accuracy_ensemble, testfeat))
         push!(divs_div, get_ensemble_diversity(diverse_ensemble, testfeat))
+
+        if i % 20 == 0
+            push!(archive_divs, (i,get_ensemble_diversity(archive_ensemble(archive), testfeat)))
+        end
+
     end
     archHM = plot_archive(archive, fitness_archive, n_bins)
-    return archHM, testaccs_acc,trainaccs_acc,testaccs_div,trainaccs_div, RF_testacc, RF_trainacc, RF_div, divs_acc, divs_div
+    return archHM, testaccs_acc,trainaccs_acc,testaccs_div,trainaccs_div, RF_testacc, RF_trainacc, RF_div, divs_acc, divs_div, archive_divs
 end
 
 function NME_exp_div_CV(features, labels; n_generations=100, n_bins=20, n_offspring=3, mutation_rate=0.05, β=4.0, epochs=50, batchsize=16, hidden_dim=128, num_trees=50, num_features=30, max_depth=4, folds=5)
@@ -573,4 +618,60 @@ function NME_exp_div_CV(features, labels; n_generations=100, n_bins=20, n_offspr
     all_RF_div /= folds
 
     return archives, all_testaccs_acc, all_trainaccs_acc, all_testaccs_div, all_trainaccs_div, all_RF_testacc, all_RF_trainacc, all_RF_div, all_divs_acc, all_divs_div
+end
+
+## alternate ensemble selection functions 
+
+function pareto_frontier(archive, features::Matrix)
+
+    n = length(archive)
+    pareto_indices = Vector{Bool}(undef,n)
+    fill!(pareto_indices, true)
+
+    # Precompute diversity scores
+    deltas = [Delta(tree, archive, features) for tree in archive]
+
+    for i in 1:n
+        for j in 1:n
+            if i != j && pareto_indices[i]
+                better_or_equal_fitness = archive[j].fitness >= archive[i].fitness
+                better_or_equal_diversity = deltas[j] >= deltas[i]
+                strictly_better = archive[j].fitness > archive[i].fitness || deltas[j] > deltas[i]
+
+                if better_or_equal_fitness && better_or_equal_diversity && strictly_better
+                    pareto_indices[i] = false
+                    break
+                end
+            end
+        end
+    end
+
+    return archive[pareto_indices]
+end
+
+## gives the threshold for the top percentile of the fitness values
+function find_top_percentile(archive, percentile::Float64)
+    fitness_values = [t.fitness for t in archive]
+    threshold = quantile(fitness_values, 1-percentile)
+    return threshold
+end
+
+### Selecting accurate and diverse trees 
+function max_diversity_ensemble(archive, features::Matrix, percentile::Float64)
+    archive = filter(t -> t.fitness > find_top_percentile(archive, 0.5), archive)
+    deltas = [Delta(tree, archive, features) for tree in archive]
+    threshold = quantile(deltas, percentile)
+    selected_indices = findall(deltas .> threshold)
+    selected_trees = [archive[i] for i in selected_indices]
+    return selected_trees
+end
+
+function max_diversity_ensemble(archive, features::Matrix, n_trees::Int)
+    archive = filter(t -> t.fitness > find_top_percentile(archive, 0.5), archive)
+    deltas = [Delta(tree, archive, features) for tree in archive]
+    percentile = n_trees/length(archive)
+    threshold = quantile(deltas, 1-percentile)
+    selected_indices = findall(deltas .> threshold)
+    selected_trees = [archive[i] for i in selected_indices]
+    return selected_trees
 end
