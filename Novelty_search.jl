@@ -41,6 +41,15 @@ function Δ_raw_bar(trees, features::Matrix{Float32})
     return sum_Δ / (n * (n - 1))
 end
 
+# Diversity of a single tree within the archive
+function Delta(tree, arch_ens, features) 
+    total = 0
+    for T in arch_ens
+            total += Δ_raw(tree, T, features)
+        end
+    return total / (length(arch_ens)-1)
+end
+
 #The fitness of a tree is defined here as the accuracy of the predictions it makes on the training data.
 function fitness(tree::Union{Leaf{Bool}, Node{Float32, Bool}}, features::Matrix{Float32}, labels)
     predictions = apply_tree(tree, features)
